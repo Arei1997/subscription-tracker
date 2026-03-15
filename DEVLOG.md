@@ -112,3 +112,58 @@ Keeping data structures in their own package means:
 All three layers speak the same language — `Subscription` objects — without any layer needing to know how the others work.
 
 ---
+
+## Step 3 — Repository Layer (`repository/`)
+
+### What is it?
+The repository layer is the **only place in the codebase that touches SQL**. It owns the database connection, all queries, and the mapping from raw SQL result rows back into `Subscription` objects.
+
+### What we created
+
+#### `DatabaseInitialiser.java`
+Runs once on startup. Creates the `subscriptions` table if it doesn't already exist (`CREATE TABLE IF NOT EXISTS`). This means the app works on a brand-new machine with no manual setup — just run it and the database is ready.
+
+It takes a JDBC URL string in its constructor (e.g. `"jdbc:sqlite:subscriptions.db"`), which makes it easy to pass an in-memory URL in tests.
+
+#### `SubscriptionRepository.java`
+Contains every SQL statement in the app. Broken into three sections:
+
+**Write operations**
+- `add(Subscription)` — inserts a new row
+- `update(Subscription)` — updates all mutable fields by ID
+- `delete(int id)` — removes a row
+
+**Read operations**
+- `findById(int)` — returns `Optional<Subscription>` (empty if not found)
+- `findAll()` — all subscriptions, sorted by name
+- `findByStatus(Status)` — filter by ACTIVE or CANCELLED
+- `findRenewingBefore(LocalDate)` — upcoming renewals within a date window
+
+**Aggregates**
+- `getTotalMonthlyCost()` — normalises all billing cycles to monthly in SQL
+- `getCostByCategory()` — same normalisation, grouped by category, ordered by cost
+
+### Key design decisions
+
+#### `PreparedStatement` everywhere
+Every query uses `PreparedStatement` with `?` placeholders — never string concatenation. This prevents SQL injection and also lets the DB engine reuse query plans.
+
+#### Connection-per-call pattern
+Each method opens a fresh `Connection` and closes it in a try-with-resources block. This is simple and correct for a single-user desktop app. A multi-user server app would use a connection pool instead.
+
+#### try-with-resources
+Every `Connection`, `PreparedStatement`, and `ResultSet` is opened inside a `try (...)` block. Java automatically calls `.close()` on them when the block exits — even if an exception is thrown. This prevents resource leaks.
+
+#### Monthly cost normalisation in SQL
+The billing cycle normalisation (monthly → ×1, annual → ÷12, weekly → ×52/12) is written as a `CASE` expression directly in SQL. Doing it in SQL means the database does the aggregation in one pass rather than loading all rows into Java and summing them up there.
+
+#### `map(ResultSet)` private helper
+All the logic for converting a result row into a `Subscription` object lives in one private method. Every read operation calls it, so there's no duplication of field-name strings or type conversions.
+
+#### Enum ↔ String conversion
+Enums are stored as their `.name()` string in the database (e.g. `"MONTHLY"`, `"ACTIVE"`). On read, `BillingCycle.valueOf(rs.getString(...))` converts back. This is simple and readable in the DB, and the enum type gives compile-time safety in Java.
+
+#### Nullable `cancelled_date`
+Before parsing `cancelled_date`, we check if the column is `null` in the result set. A null string passed to `LocalDate.parse()` would throw — the null check prevents that.
+
+---
