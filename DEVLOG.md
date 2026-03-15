@@ -58,3 +58,57 @@ mvn clean package  # Full clean rebuild
 ```
 
 ---
+
+## Step 2 — Model Layer (`model/`)
+
+### What is it?
+The model layer defines the **data structures** the rest of the application works with. It has no logic, no database code, and no user interaction — it purely represents what a subscription *is*.
+
+### What we created
+
+#### Enums — `Category`, `BillingCycle`, `Status`
+An **enum** (enumeration) is a special Java type for a fixed set of named constants. Instead of storing raw strings like `"MONTHLY"` throughout the code (which can be mistyped or inconsistent), we define them once as an enum and use the type everywhere.
+
+```java
+public enum BillingCycle {
+    MONTHLY, ANNUAL, WEEKLY
+}
+```
+
+Benefits:
+- The compiler catches typos at build time — `BillingCycle.MONTLY` won't compile
+- IDEs autocomplete the valid values
+- Easy to `switch` on in business logic
+
+In the database, these are still stored as plain strings (`TEXT` column). When we read them back from SQLite we convert: `BillingCycle.valueOf(resultSet.getString("billing_cycle"))`.
+
+#### Record — `Subscription.java`
+A **record** is a Java 16+ feature for creating immutable data carriers with minimal boilerplate. Declaring:
+
+```java
+public record Subscription(int id, String name, ...) {}
+```
+
+automatically gives you:
+- A constructor with all fields
+- Getters for every field (called `id()`, `name()`, etc. — no `get` prefix)
+- `equals()`, `hashCode()`, and `toString()` implementations
+
+Records are **immutable** — once created, the values cannot be changed. This is intentional: if something about a subscription needs updating, a new object is created. This makes the data easier to reason about and prevents accidental mutation.
+
+#### Nullable fields
+Two fields can be `null`:
+- `cancelledDate` — only set when a subscription is cancelled
+- `notes` — optional free text
+
+We use plain `null` (not `Optional`) consistently across the entire codebase. This was a deliberate convention choice — mixing both would be inconsistent and confusing.
+
+### Why separate the model layer?
+Keeping data structures in their own package means:
+- The `repository` knows what shape to return data in
+- The `service` knows what shape to validate and process
+- The `CLI` knows what shape to display
+
+All three layers speak the same language — `Subscription` objects — without any layer needing to know how the others work.
+
+---
