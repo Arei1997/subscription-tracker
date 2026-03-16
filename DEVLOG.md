@@ -378,3 +378,58 @@ Validation tests assert that when bad input is given, the repository is never to
 The project runs on Java 25. Mockito's underlying bytecode library (Byte Buddy) officially supports up to Java 22. Adding `-Dnet.bytebuddy.experimental=true` to the Surefire `<argLine>` in `pom.xml` enables support for newer JVM versions without upgrading Mockito.
 
 ---
+
+## Step 9 — Logback Config & Final Build (`logback.xml`)
+
+### What we created
+
+#### `src/main/resources/logback.xml`
+Configures how log messages are written at runtime. Two appenders:
+
+- **CONSOLE** — writes to `System.err` so log output doesn't mix with the CLI's `System.out` menu text. Pattern shows time, level, logger name, and message.
+- **FILE** — writes to `logs/app.log` with daily rolling (7 days kept). Useful for debugging without cluttering the terminal.
+
+The `com.tracker` logger is set to `WARN`, which silences all the `INFO` messages the repository and service emit during normal operation. The user only sees the CLI output — not internal log lines for every add/update/delete.
+
+#### `mvn clean package` smoke test
+Running `mvn clean package`:
+1. Compiles all source
+2. Runs all 29 tests (12 repository + 17 service)
+3. Produces `target/subscription-tracker.jar` — a 14MB fat JAR containing the app and all dependencies
+
+The app can now be run on any machine with Java installed:
+```bash
+java -jar target/subscription-tracker.jar
+```
+
+### Shade plugin warnings
+The build prints warnings about overlapping `MANIFEST.MF` entries across bundled JARs. These are harmless — the shade plugin picks one and moves on. They do not affect runtime behaviour.
+
+---
+
+## Project Complete
+
+All 9 steps are done. The full architecture from bottom to top:
+
+```
+Main.java  (CLI — Scanner menu, all user I/O)
+    ↓
+SubscriptionService  (validation, business logic, no SQL)
+    ↓
+SubscriptionRepository  (all SQL, PreparedStatements only)
+    ↓
+SQLite  (subscriptions.db — schema created on first run)
+```
+
+**29 tests, 0 failures.**
+
+```bash
+# Run the app
+java -jar target/subscription-tracker.jar
+
+# Run tests
+mvn test
+
+# Rebuild
+mvn clean package
+```
