@@ -167,3 +167,68 @@ Enums are stored as their `.name()` string in the database (e.g. `"MONTHLY"`, `"
 Before parsing `cancelled_date`, we check if the column is `null` in the result set. A null string passed to `LocalDate.parse()` would throw — the null check prevents that.
 
 ---
+
+## Step 4 — Project Structure
+
+### What we created
+Added the remaining Maven standard directories:
+- `src/main/resources/` — for config files (e.g. `logback.xml`)
+- `src/test/java/com/tracker/` — for all test classes
+- `src/test/resources/` — for test config overrides
+
+Each directory contains a `.gitkeep` file so git tracks them even when empty. These are removed once real files are placed inside.
+
+Also deleted the stale `com/subscriptiontracker/` tree left over from an earlier draft — the active package is `com/tracker/`.
+
+---
+
+## Step 5 — Service Layer (`service/`)
+
+### What is it?
+The service layer sits between the CLI and the repository. It owns all **business logic and validation**. It never writes SQL — it calls the repository for all data access.
+
+### What we created
+
+#### `SubscriptionService.java`
+The single service class. Takes a `SubscriptionRepository` in its constructor (injected dependency — makes it easy to mock in tests).
+
+**Add**
+- `add(name, category, cost, billingCycle, startDate, notes)` — validates input, calculates renewal date, builds a `Subscription` with `id=0` (DB assigns the real ID), calls `repository.add()`.
+
+**Update**
+- `update(id, ...)` — looks up the existing record first (`getOrThrow`), validates, recalculates renewal date, preserves `status`, `cancelledDate`, and `createdAt` from the original.
+
+**Delete**
+- `delete(int id)` — verifies the subscription exists before delegating to the repository.
+
+**Cancel / reactivate**
+- `cancel(int id)` — sets status to `CANCELLED`, records today as `cancelledDate`. Throws if already cancelled.
+- `reactivate(int id)` — sets status back to `ACTIVE`, clears `cancelledDate`, recalculates a fresh renewal date from today. Throws if already active.
+
+**Queries**
+- `getAll()`, `getActive()`, `getCancelled()`, `findById(int)`
+- `getRenewingWithinDays(int days)` — wraps `findRenewingBefore(today + days)`
+
+**Aggregates**
+- `getTotalMonthlyCost()` — delegates to repository
+- `getTotalAnnualCost()` — multiplies monthly × 12 (no extra SQL needed)
+- `getCostByCategory()` — delegates to repository
+
+### Key design decisions
+
+#### No SQL here — ever
+The service never imports `java.sql`. All data access goes through the repository. This is enforced by the package boundary.
+
+#### `getOrThrow` private helper
+Rather than scattering `Optional.orElseThrow` calls, one private method fetches by ID and throws `IllegalArgumentException` if missing. All write operations call it first, so the CLI always gets a clear error if the user types a bad ID.
+
+#### Validation is centralised here
+`validateName` and `validateCost` are private methods called by both `add` and `update`. The CLI does not validate — it passes raw input to the service and catches `IllegalArgumentException` to show the user an error message.
+
+#### `calculateRenewalDate` is package-visible
+Marked `static` and not `private` so the service tests can call it directly to verify renewal date logic without going through `add()`.
+
+#### Reactivation recalculates renewal from today
+When a cancelled subscription is reactivated, the old renewal date is stale. A fresh renewal date is calculated from `LocalDate.now()` using the original billing cycle.
+
+---
