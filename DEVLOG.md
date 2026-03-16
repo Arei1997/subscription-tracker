@@ -329,3 +329,52 @@ Each test starts with a fresh schema. Dropping and recreating the table in `@Bef
 For `getTotalMonthlyCost_normalisesAllBillingCycles`, the weekly cost is chosen as £3/week because `3 × 52 ÷ 12 = 13` exactly — a clean integer that makes the assertion obvious. Choosing an arbitrary weekly cost would produce a recurring decimal and obscure the intent.
 
 ---
+
+## Step 8 — Service Tests (`SubscriptionServiceTest`)
+
+### What is it?
+Unit tests for `SubscriptionService` using Mockito to mock the repository. No database is involved — the service's logic is tested in complete isolation.
+
+### What we created
+
+#### `SubscriptionServiceTest.java`
+17 tests covering all service methods:
+
+| Test | What it verifies |
+|------|-----------------|
+| `add_validInput_callsRepositoryWithCorrectFields` | Correct `Subscription` is built and passed to the repository |
+| `add_blankName_throwsIllegalArgumentException` | Blank name is rejected before touching repository |
+| `add_zeroCost_throwsIllegalArgumentException` | Zero cost is rejected |
+| `add_negativeCost_throwsIllegalArgumentException` | Negative cost is rejected |
+| `add_blankNotes_savedAsNull` | Whitespace-only notes are stored as `null` |
+| `update_validInput_preservesStatusAndCreatedAt` | Status and `createdAt` are carried over from the existing record |
+| `update_unknownId_throwsIllegalArgumentException` | Unknown ID rejected, repository `update` never called |
+| `delete_existingId_callsRepositoryDelete` | Repository `delete` is called with the correct ID |
+| `delete_unknownId_throwsIllegalArgumentException` | Unknown ID rejected, repository `delete` never called |
+| `cancel_activeSubscription_setsStatusAndCancelledDate` | Status set to CANCELLED, cancelled date populated |
+| `cancel_alreadyCancelled_throwsIllegalStateException` | Double-cancel is rejected |
+| `reactivate_cancelledSubscription_setsActiveAndClearsDate` | Status set to ACTIVE, cancelled date cleared |
+| `reactivate_alreadyActive_throwsIllegalStateException` | Double-reactivate is rejected |
+| `getTotalAnnualCost_returnsMonthlyTimestwelve` | Annual = monthly × 12 |
+| `calculateRenewalDate_monthly_addOneMonth` | MONTHLY adds exactly one month |
+| `calculateRenewalDate_annual_addOneYear` | ANNUAL adds exactly one year |
+| `calculateRenewalDate_weekly_addOneWeek` | WEEKLY adds exactly one week |
+
+### Key design decisions
+
+#### Mockito instead of a real database
+The repository is mocked with `@Mock`. This means tests run in milliseconds and never need file I/O. The service's logic is tested independently of whether the SQL is correct — that's the repository tests' job.
+
+#### `@ExtendWith(MockitoExtension.class)`
+Tells JUnit 5 to activate Mockito's annotations. Without this, `@Mock` fields would be `null`.
+
+#### `ArgumentCaptor` for write operations
+For `add`, `update`, `cancel`, and `reactivate`, we use `ArgumentCaptor<Subscription>` to capture the exact object passed to `repository.add()` / `repository.update()`. This lets us assert on every field of the built object, not just that the method was called.
+
+#### `verifyNoInteractions` / `verify(repo, never())`
+Validation tests assert that when bad input is given, the repository is never touched at all. This confirms validation runs before any data access.
+
+#### Byte Buddy experimental flag
+The project runs on Java 25. Mockito's underlying bytecode library (Byte Buddy) officially supports up to Java 22. Adding `-Dnet.bytebuddy.experimental=true` to the Surefire `<argLine>` in `pom.xml` enables support for newer JVM versions without upgrading Mockito.
+
+---
