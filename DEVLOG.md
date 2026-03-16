@@ -285,3 +285,47 @@ Option 8 asks `"Are you sure? (yes/no)"` before deleting. Only the literal strin
 Output is formatted with `printf` and fixed column widths so rows line up regardless of content length. Long names are truncated with `…` to keep the table readable.
 
 ---
+
+## Step 7 — Repository Tests (`SubscriptionRepositoryTest`)
+
+### What is it?
+Integration tests that exercise `SubscriptionRepository` against a real SQLite database. They test that every SQL statement in the repository actually works — things that unit tests with mocks cannot catch.
+
+### What we created
+
+#### `SubscriptionRepositoryTest.java`
+12 tests covering every public method on the repository:
+
+| Test | What it verifies |
+|------|-----------------|
+| `add_and_findById_returnsSubscription` | Round-trip: insert then fetch by ID |
+| `findById_unknownId_returnsEmpty` | Returns `Optional.empty()` for missing IDs |
+| `findAll_returnsAllSubscriptions_sortedByName` | Alphabetical ordering |
+| `findAll_emptyDatabase_returnsEmptyList` | Empty list on fresh DB |
+| `findByStatus_returnsOnlyMatchingStatus` | Filters correctly by ACTIVE / CANCELLED |
+| `update_changesStoredValues` | All mutable fields are persisted |
+| `delete_removesSubscription` | Row is gone after delete |
+| `findRenewingBefore_returnsOnlyActiveWithinWindow` | Date window + excludes cancelled |
+| `getTotalMonthlyCost_normalisesAllBillingCycles` | MONTHLY/ANNUAL/WEEKLY all normalise correctly |
+| `getTotalMonthlyCost_excludesCancelledSubscriptions` | Cancelled rows not counted |
+| `getCostByCategory_groupsAndSortsByMonthlyCost` | Groups by category, sorted descending |
+| `nullableFields_roundtripCorrectly` | `null` cancelled date and notes survive a round-trip |
+
+### Key design decisions
+
+#### Named shared in-memory database
+SQLite in-memory databases are connection-scoped — each `DriverManager.getConnection` call gets its own empty database. Using `jdbc:sqlite:file:testdb?mode=memory&cache=shared` creates a named in-memory database shared across connections within the same process.
+
+#### Keeper connection
+A `static Connection keeper` is opened in `@BeforeAll` and closed in `@AfterAll`. Its only job is to keep the named in-memory database alive. Without it, the DB is destroyed when the last connection closes, which would happen between `DatabaseInitialiser` and the repository's first query.
+
+#### `DROP TABLE IF EXISTS` in `@BeforeEach`
+Each test starts with a fresh schema. Dropping and recreating the table in `@BeforeEach` guarantees no data leaks between tests, and auto-increment IDs reset to 1.
+
+#### Private builder methods
+`subscription()`, `subscriptionWithCost()`, `subscriptionWithCategory()`, etc. are private helper methods that construct `Subscription` objects with sensible defaults. Tests only set the fields they care about — keeps each test focused and readable.
+
+#### Weekly cost arithmetic
+For `getTotalMonthlyCost_normalisesAllBillingCycles`, the weekly cost is chosen as £3/week because `3 × 52 ÷ 12 = 13` exactly — a clean integer that makes the assertion obvious. Choosing an arbitrary weekly cost would produce a recurring decimal and obscure the intent.
+
+---
