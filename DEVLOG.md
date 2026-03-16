@@ -232,3 +232,56 @@ Marked `static` and not `private` so the service tests can call it directly to v
 When a cancelled subscription is reactivated, the old renewal date is stale. A fresh renewal date is calculated from `LocalDate.now()` using the original billing cycle.
 
 ---
+
+## Step 6 — Entry Point & CLI (`Main.java`)
+
+### What is it?
+`Main.java` is the entry point of the application — it's where execution starts (`public static void main`). It also contains the entire CLI: the menu loop, all user prompts, and all display formatting. No business logic lives here.
+
+### What we created
+
+#### `Main.java`
+Wires everything together on startup:
+1. Creates the database via `DatabaseInitialiser`
+2. Creates `SubscriptionRepository` with the SQLite URL
+3. Creates `SubscriptionService` with the repository
+4. Hands control to the menu loop
+
+The menu loop (`run`) prints options 0–10, reads the user's choice, and dispatches to a handler method. Each handler is a private `static` method responsible for exactly one action.
+
+**Menu options**
+| Option | What it does |
+|--------|-------------|
+| 1 | Add subscription |
+| 2 | List all |
+| 3 | List active |
+| 4 | List cancelled |
+| 5 | Update subscription |
+| 6 | Cancel subscription |
+| 7 | Reactivate subscription |
+| 8 | Delete subscription (with confirmation) |
+| 9 | Upcoming renewals (user picks day window) |
+| 10 | Cost summary (monthly + annual total, breakdown by category) |
+| 0 | Exit |
+
+### Key design decisions
+
+#### CLI catches exceptions, not the service
+The `switch` block is wrapped in a single `try/catch` for `IllegalArgumentException` and `IllegalStateException`. The service throws these on bad input or invalid state transitions. The CLI catches them and prints a friendly message. This means the service never needs to know about `System.out`.
+
+#### `run` is package-visible for testing
+The loop is extracted into a static `run(service, scanner)` method so tests can call it directly with a fake `Scanner` and a mock service — without needing to actually start the app.
+
+#### Input helpers loop until valid
+`promptInt`, `promptDouble`, and `promptDate` all loop until the user enters valid input rather than crashing on bad input. The "or keep" variants (`promptDoubleOrKeep`, `promptEnumOrKeep`, etc.) accept a blank line as "keep current value" — useful for the update flow.
+
+#### Enums displayed as numbered options
+`promptEnum` uses reflection (`type.getEnumConstants()`) to list all values dynamically. Adding a new `Category` or `BillingCycle` value in the future automatically shows up in the menu with no code change needed.
+
+#### Delete requires confirmation
+Option 8 asks `"Are you sure? (yes/no)"` before deleting. Only the literal string `"yes"` proceeds. Any other input cancels. This prevents accidental data loss.
+
+#### `printTable` uses fixed-width columns
+Output is formatted with `printf` and fixed column widths so rows line up regardless of content length. Long names are truncated with `…` to keep the table readable.
+
+---
